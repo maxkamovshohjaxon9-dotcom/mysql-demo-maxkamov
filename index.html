@@ -15,34 +15,92 @@
 <body>
   <h1>Ismingizni qoldiring</h1>
   <input id="name" placeholder="Ism" maxlength="100">
-  <button onclick="add()">Saqlash</button>
+  <button id="save" onclick="add()">Saqlash</button>
+  <p id="status" role="status" aria-live="polite"></p>
   <ul id="list"></ul>
 
 <script>
 const API = "/.netlify/functions/api";
+const SAVE_API = "/.netlify/functions/save-name";
+
+function showStatus(text, isError) {
+  const el = document.getElementById("status");
+  el.textContent = text;
+  el.style.color = isError ? "#c00" : "#080";
+}
+
+async function readJson(res) {
+  try { return await res.json(); } catch { return null; }
+}
 
 async function load() {
-  const rows = await (await fetch(API)).json();
-  const ul = document.getElementById("list");
-  ul.innerHTML = "";
-  rows.forEach(r => {
-    const li = document.createElement("li");
-    li.textContent = r.name + " ";
-    const s = document.createElement("small");
-    s.textContent = "(" + new Date(r.created_at).toLocaleString() + ")";
-    li.appendChild(s);
-    ul.appendChild(li);
-  });
+  try {
+    const res = await fetch(API);
+    const data = await readJson(res);
+    if (!res.ok || !Array.isArray(data)) {
+      throw new Error((data && data.error) || "Ro'yxatni yuklab bo'lmadi.");
+    }
+    const ul = document.getElementById("list");
+    ul.innerHTML = "";
+    data.forEach(r => {
+      const li = document.createElement("li");
+      li.textContent = r.name + " ";
+      const s = document.createElement("small");
+      s.textContent = "(" + new Date(r.created_at).toLocaleString() + ")";
+      li.appendChild(s);
+      ul.appendChild(li);
+    });
+  } catch (err) {
+    showStatus("Xatolik: " + err.message, true);
+  }
 }
 
+let saving = false;
+
 async function add() {
+  if (saving) return;
   const input = document.getElementById("name");
+  const button = document.getElementById("save");
   const name = input.value.trim();
-  if (!name) return;
-  await fetch(API, { method: "POST", body: JSON.stringify({ name }) });
-  input.value = "";
-  load();
+  if (!name) {
+    showStatus("Iltimos, ismingizni kiriting.", true);
+    input.focus();
+    return;
+  }
+
+  saving = true;
+  button.disabled = true;
+  button.textContent = "Saqlanmoqda...";
+  showStatus("", false);
+
+  try {
+    const res = await fetch(SAVE_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name })
+    });
+    const data = await readJson(res);
+    if (!res.ok) {
+      throw new Error((data && data.error) || "Server xatosi (" + res.status + ").");
+    }
+    input.value = "";
+    showStatus((data && data.message) || "Ism muvaffaqiyatli saqlandi!", false);
+    load();
+  } catch (err) {
+    const msg = err instanceof TypeError
+      ? "Serverga ulanib bo'lmadi. Internet aloqasini tekshiring."
+      : err.message;
+    showStatus("Xatolik: " + msg, true);
+  } finally {
+    saving = false;
+    button.disabled = false;
+    button.textContent = "Saqlash";
+  }
 }
+
+document.getElementById("name").addEventListener("keydown", e => {
+  if (e.key === "Enter") add();
+});
 
 load();
 </script>
